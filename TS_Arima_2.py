@@ -42,7 +42,7 @@ predictions = list()
 # print ('Predictions :' , predictions)
 
 for t in range(len(test)):
-    model = ARIMA(history, order=(5,1,0))
+    model = ARIMA(history, order=(5,2,0))
     model_fit = model.fit(disp=0)
     output = model_fit.forecast()
     yhat = output[0]
