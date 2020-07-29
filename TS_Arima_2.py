@@ -23,6 +23,8 @@ queri = input('Enter queri number : ')
 case = input('Enter case 1(working week)  or 2(sunday) : ')
 
 series = read_csv(wd + 'TS_Query_' + queri + '.' + case +'.csv', index_col=1, parse_dates=[1],usecols = ['Timestamp','Records Affected'], date_parser=parser)
+series.sort_values(by=['Timestamp'], inplace=True)
+
 print('Series ',series.head())
 print(series.shape)
 
