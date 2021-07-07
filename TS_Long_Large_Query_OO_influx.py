@@ -45,15 +45,15 @@ class  TS_Long_Large_Query :
 
      self.Extract = {
           '_id':0,
-          # 'Timestamp':1,
+          'Timestamp':1,
           'Response Time':1,
           'Records Affected':1,
           'DayOfYear':1,
-          # 'WeekOfYear':1,
+          'WeekOfYear':1,
           'HashHash User Datastore':1,
-          # 'Timestamp':1,
-          'Year':1
-          # 'DayOfWeek':1
+          'Timestamp':1,
+          'Year':1,
+          'DayOfWeek':1
           }
 
  def open_PostGres(self):
@@ -163,23 +163,13 @@ class  TS_Long_Large_Query :
      # for extract in Extraction:
          # print ("Extract ", extract)
      for extract in Extraction:
-         if extract[2] is None :
+         if extract[4] is None :
             print ("None in Extract")
-            extract[2] = 0
-         if int(extract[2]) > -1 :
-            # Compute Date from DayOfYear
-            day_num = str(extract[1])
-            print (" Type = " , type(extract[0]))
-            year  =  str(int(extract[0]))
-            recs  =  extract[2]
-            # adjusting day num
-            day_num.rjust(3 + len(day_num), '0')
-            # converting to date
-            ts = datetime.strptime(year + "-" + day_num, "%Y-%j").strftime("%m-%d-%Y")
-
-            # Computing DayOfWeek
-            tag1 = ts.weekday()
-            
+            extract[4] = 0
+         if int(extract[4]) > -1 :
+            ts = extract[3]
+            tag1 =  extract[2]
+            recs  =  extract[4]
             # print ("Exttracted > -1 ", recs )
             # print(tag1 , ts , recs, type(recs))
             point = Point(measurement).tag("DayOfWeek", tag1 ).field("Extracted", recs).time(ts, WritePrecision.S)
@@ -192,25 +182,22 @@ class  TS_Long_Large_Query :
 
  def aggreg_extract(self, ExtrDf):
 
-      # TSExtract = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=[np.sum]).reset_index()
-      TSExtract = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear'], aggfunc=[np.sum]).reset_index()
+      TSExtract = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=[np.sum]).reset_index()
       TSENumPy = TSExtract.to_numpy()
-      # print(TSENumPy[:])
-      # exit(0)
+      print(TSENumPy[:])
+      exit(0)
       return(TSENumPy)
 
  def aggreg_countOfSqls(self, ExtrDf):
-      # TSCount = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=len ).reset_index()
-      TSCount = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear'], aggfunc=len ).reset_index()
+      TSCount = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=len ).reset_index()
       TSCount = TSCount.to_numpy()
-      # print(TSCount[:])
-      # exit(0)
+      print(TSCount[:])
+      exit(0)
       return(TSCount)
       # print(TSNumPy[:])
 
  def aggreg_respTime(self, ExtrDf):
-      # TSResp = pd.pivot_table(ExtrDf , values = 'Response Time', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=[np.sum] ).reset_index()
-      TSResp = pd.pivot_table(ExtrDf , values = 'Response Time', index=['Year','DayOfYear'], aggfunc=[np.sum] ).reset_index()
+      TSResp = pd.pivot_table(ExtrDf , values = 'Response Time', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=[np.sum] ).reset_index()
       TSResp = TSResp.to_numpy()
      
       return(TSResp)
@@ -231,8 +218,8 @@ if __name__ == '__main__':
     TS = pd.DataFrame(list(Extraction))
     # print("TS ts Before = " , type(TS['Timestamp']), TS['Timestamp'])
     # TS['Timestamp'] =  TS['Timestamp'][0:10]+"T00:00:00Z"
-    # TS['Timestamp'] =  pd.DatetimeIndex(TS['Timestamp']).normalize()
-    # print("TS After = " , TS.columns)
+    TS['Timestamp'] =  pd.DatetimeIndex(TS['Timestamp']).normalize()
+    print("TS After = " , TS.columns)
 
     if p1.procType == "1":
        TS = p1.aggreg_extract(TS)
