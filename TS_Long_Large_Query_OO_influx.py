@@ -11,8 +11,6 @@ from pymongo.errors import BulkWriteError
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from datetime import datetime
-import numpy as np
-import pandas as pd
 
 
 class  TS_Long_Large_Query :
@@ -32,17 +30,18 @@ class  TS_Long_Large_Query :
      self.queryNbr = "#" + self.QueryNbr
      print(self.queryNbr)
 
-     dateStart = input(" Date to Start from yyyy-mm-dd : ")
-     self.date_start = dt.datetime.strptime(dateStart[:10],'%Y-%m-%d')
-     # self.date_start = datetime.datetime(2020, int(monthStart) , 1, 5)
-     dateEnd = input(" Date to End from yyyy-mm-dd : ")
-     self.date_end = dt.datetime.strptime(dateEnd[:10],'%Y-%m-%d')
-     # self.date_end = datetime.datetime(2020, int(monthStart) , 1, 5)
+     self.query_to_study = None
 
+     self.Start = int(input(" Week to Start From  : "))
+     self.End = int(input(" Week to End to (included) : "))
+
+     self.Extraction = None
 
      self.procType = input("What data do you want to study ? 1: Extraction , 2: Count of SQLs, 3: Response Time  --  Your Answer  = ")
      print ('Type of Data to be Processed ', self.procType )
 
+
+     # Display ...
      self.Extract = {
           '_id':0,
           'Timestamp':1,
@@ -55,6 +54,20 @@ class  TS_Long_Large_Query :
           'Year':1,
           'DayOfWeek':1
           }
+
+
+     self.groupip = {
+       "$group" : { "_id" :
+                 {  "Day of Year" : "$DayOfYear" },
+               "From" : { "$min" : "$Timestamp" },
+               "To" : { "$max" : "$Timestamp" },
+               "DayOfWeek" : { "$max" : "$DayOfWeek" },
+               "Extract" : { "$sum" : "$Records Affected" },
+               "Resp Time" : { "$sum" : "$Response Time" },
+               "CountOfSQLs" : { "$sum" : 1 }}
+       }
+       
+
 
  def open_PostGres(self):
 
@@ -101,21 +114,25 @@ class  TS_Long_Large_Query :
     select_Query = "select query from query where queryName = " + "'" + p1.queryNbr + "'"
     cursor.execute(select_Query)
     query_to_study_t  = cursor.fetchone()
-    query_to_study  = query_to_study_t[0]
-    print (query_to_study)
-    return(query_to_study)
+    p1.query_to_study  = query_to_study_t[0]
+    print (p1.query_to_study)
+    # return(query_to_study)
 
  def get_series(self,myclient,query_to_study):
 
      mydb = myclient["AIMAnalytics"]
-     print("p1.date_start",p1.date_start)
+     print("p1.Start",p1.Start)
      mycol = mydb["ENRICHED_FULL_SQL_PYTHON"]
  
-     ToBeFoundAll = {
-             'HashHash User Datastore': query_to_study ,
-             'Timestamp':{'$gte': p1.date_start},
-             'Timestamp':{'$lte': p1.date_end}
-             }
+     ToBeFoundAll = { "$and" : [
+              {'HashHash User Datastore': p1.query_to_study}  , 
+              {'WeekOfYear':{'$gte': p1.Start}} ,
+              {'WeekOfYear':{'$lte': p1.End}}
+             ] }
+            
+
+     print ("ToBeFoundAll" , ToBeFoundAll)
+
      Nbr = mycol.find(ToBeFoundAll).count()
 
      print (' Nbr of MongoDB Documents to Process',Nbr)
@@ -125,18 +142,20 @@ class  TS_Long_Large_Query :
      NextStep = input(" Do you want to continue ? (Y/N) ")
      if NextStep == "N" :
         exit(0)
-     Extraction = mycol.find(ToBeFoundAll, p1.Extract)
-     criteria = ToBeFoundAll
+
+     ToBeFoundAllAgg = [ { "$match" : ToBeFoundAll } , p1.groupip ]
+
+     # pipeline = list(ToBeFoundAllAgg ,p1.groupip)
+
+     print (ToBeFoundAllAgg)
+
+     # input()
+
+     p1.Extraction = mycol.aggregate(ToBeFoundAllAgg)
      
-    
      print (' Mongo find completed')
 
-     # print ("Extraction" , Extraction)
-
-     return(Extraction)
-
-
- def InputInflux(self,Extraction):
+ def InputInflux(self):
      # -- Insert in InfluxDB
 
      # You can generate a Token from the "Tokens Tab" in the UI
@@ -162,45 +181,23 @@ class  TS_Long_Large_Query :
      print ("Start Ingesting into InfluxDB ")
      # for extract in Extraction:
          # print ("Extract ", extract)
-     for extract in Extraction:
-         if extract[4] is None :
-            print ("None in Extract")
-            extract[4] = 0
-         if int(extract[4]) > -1 :
-            ts = extract[3]
-            tag1 =  extract[2]
-            recs  =  extract[4]
-            # print ("Exttracted > -1 ", recs )
-            # print(tag1 , ts , recs, type(recs))
-            point = Point(measurement).tag("DayOfWeek", tag1 ).field("Extracted", recs).time(ts, WritePrecision.S)
-            write_api.write(bucket, org, point)
+     for pointTemp in p1.Extraction:
+         tag1 = pointTemp["DayOfWeek"]
+         if p1.procType == "1":
+            recs = pointTemp["Extract"]
+         if p1.procType == "2":
+            recs = pointTemp["CountOfSQLs"]
+         if p1.procType == "3":
+            recs = pointTemp["Resp Time"]
+         ts = pointTemp["To"]
+         point = Point(measurement).tag("DayOfWeek", tag1 ).field("Extracted", recs).time(ts, WritePrecision.S)
+         write_api.write(bucket, org, point)
 
 
 
      print ("End Of  Ingesting into InfluxDB ")
 
 
- def aggreg_extract(self, ExtrDf):
-
-      TSExtract = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=[np.sum]).reset_index()
-      TSENumPy = TSExtract.to_numpy()
-      print(TSENumPy[:])
-      exit(0)
-      return(TSENumPy)
-
- def aggreg_countOfSqls(self, ExtrDf):
-      TSCount = pd.pivot_table(ExtrDf , values = 'Records Affected', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=len ).reset_index()
-      TSCount = TSCount.to_numpy()
-      print(TSCount[:])
-      exit(0)
-      return(TSCount)
-      # print(TSNumPy[:])
-
- def aggreg_respTime(self, ExtrDf):
-      TSResp = pd.pivot_table(ExtrDf , values = 'Response Time', index=['Year','DayOfYear','DayOfWeek','Timestamp'], aggfunc=[np.sum] ).reset_index()
-      TSResp = TSResp.to_numpy()
-     
-      return(TSResp)
 
 if __name__ == '__main__':
     print("Start  Recording of Time Series - Extraction - Response Time -")
@@ -214,20 +211,10 @@ if __name__ == '__main__':
 
     myclient.close()
 
-    Extraction = p1.get_series(myclient,query_to_study)
-    TS = pd.DataFrame(list(Extraction))
-    # print("TS ts Before = " , type(TS['Timestamp']), TS['Timestamp'])
-    # TS['Timestamp'] =  TS['Timestamp'][0:10]+"T00:00:00Z"
-    TS['Timestamp'] =  pd.DatetimeIndex(TS['Timestamp']).normalize()
-    print("TS After = " , TS.columns)
-
-    if p1.procType == "1":
-       TS = p1.aggreg_extract(TS)
-    elif p1.procType == "2":
-       TS = p1.aggreg_countOfSqls(TS)
-    else:
-       TS = p1.aggreg_respTime(TS)
-
-    p1.InputInflux(TS)
+    p1.get_series(myclient,query_to_study)
 
 
+
+    p1.InputInflux()
+
+    print("End of Recording of Time Series - Extraction - Response Time -")
