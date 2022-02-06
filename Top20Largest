@@ -1,0 +1,240 @@
+$ cat  WeeklyTop20PHIQuery.py
+import pymongo
+import urllib.parse
+import json
+import getpass
+import datetime
+import time
+import os
+import sys
+import calendar
+import socket
+import glob
+import csv
+import psycopg2
+import numpy as np
+import pandas as pd
+from bson.son import SON
+from tabulate import tabulate
+
+class WeeklyTop20PHIQuery:
+
+  def __init__(self,param_json):
+
+     #Access to PostGreSQL
+     self.postgres_connect = None
+     self.cursor = None
+
+     self.CURRENT_TIMESTAMP = None
+     self.myListColls = None
+
+     with open(param_json) as f:
+          self.param_data = json.load(f)
+
+
+     self.mongoUserName =  self.param_data["mongoUserName"]
+     username = urllib.parse.quote_plus(self.mongoUserName)
+     self.mongoPwd =  self.param_data["mongoPwd"]
+     password = urllib.parse.quote_plus(self.mongoPwd)
+     self.mongoString =  self.param_data["mongoConnectString"]
+     self.myclient = pymongo.MongoClient('mongodb://%s:%s@127.0.0.1:27117/admin' % (username, password))
+
+     self.Docs2F = None
+
+     try:
+        self.WOY = int(str(sys.argv[1]))
+        print (self.WOY)
+     except OSError as e :
+        print ('Error' , sys.argv[1], e )
+        self.WOY = int(input ("Week Nbr ? "))
+
+     try:
+        self.DBT = sys.argv[2]
+     except:
+        self.DBT = input ("DB Type ? ")
+
+
+
+     self.WeekOfYear = { "WeekOfYear" : 50}
+     self.WeekOfYear["WeekOfYear"] = self.WOY
+
+
+     self.pipelineTop20 = [{
+       "$match" : { "$and" : [
+         self.WeekOfYear ,
+                           {"Select Type" : { '$ne' : "Count"}},
+                           {"Access Rule Description" : "Sensitive Object Access - LOG MASKED DETAILS - Select"},
+                           {"Server Metadata.Env" : "PROD"} ]
+       }
+       },
+       {
+       "$group" : { "_id" :
+                 { "HashHash User Datastore" :  "$HashHash User Datastore",
+                   "Original SQL" : "$Original SQL" ,
+                   "Select Type" : "$Select Type" ,
+                   "Year" : "$Year" ,
+                   "DBType" : "$Server Type" ,
+                   "WeekOfYear" : "$WeekOfYear" },
+               "From" : { "$min" : "$Timestamp" },
+               "To" : { "$max" : "$Timestamp" },
+               "Extract" : { "$sum" : "$Records Affected" },
+               "CountOfSQLs" : { "$sum" : 1 }}
+       },
+       {
+       "$sort" : SON([("Extract", -1)])
+       },
+       {
+       "$limit" : 30
+       }
+       ]
+
+
+     self.pipelineTop21 = [{
+       "$match" : { "$and" : [
+         self.WeekOfYear ,
+                           {"Select Type" : { '$ne' : "Count"}},
+                           {"Server Type" : self.DBT },
+                           {"Access Rule Description" : "Sensitive Object Access - LOG MASKED DETAILS - Select"},
+                           {"Server Metadata.Env" : "PROD"} ]
+       }
+       },
+       {
+       "$group" : { "_id" :
+                 { "HashHash User Datastore" :  "$HashHash User Datastore",
+                   "Original SQL" : "$Original SQL" ,
+                   "Select Type" : "$Select Type" ,
+                   "Year" : "$Year" ,
+                   "DBType" : "$Server Type" ,
+                   "WeekOfYear" : "$WeekOfYear" },
+               "From" : { "$min" : "$Timestamp" },
+               "To" : { "$max" : "$Timestamp" },
+               "Extract" : { "$sum" : "$Records Affected" },
+               "CountOfSQLs" : { "$sum" : 1 }}
+       },
+       {
+       "$sort" : SON([("Extract", -1)])
+       },
+       {
+       "$limit" : 30
+       }
+       ]
+
+
+  # Opening PostGreSQL
+  def open_PostGres(self):
+
+    try:
+         self.postgres_connect = psycopg2.connect(user = "sonargd",
+                                  # password = "AIM2020",
+                                  # host = "127.0.0.1",
+                                  port = "5432",
+                                  database = "infra"
+                                  )
+
+
+    except (Exception, psycopg2.Error) as error :
+         print("Error while connecting to PostgreSQL", error)
+         print ("Hello")
+
+
+
+  def posGresPrep(self):
+      # myclient=open_Mongo()
+      # -- Open PostGres
+      p1.open_PostGres()
+      self.cursor = self.postgres_connect.cursor()
+      print ( self.postgres_connect.get_dsn_parameters(),"\n")
+      self.cursor.execute("SELECT version();")
+      record = self.cursor.fetchone()
+      print("You are connected to - ", record,"\n")
+
+
+  # --- updateTopQueryTable  ----
+  def updateTopQueryTable(self,AggDf):
+      mydb = self.myclient["sonargd"]
+      postgres_insert_query = """ INSERT INTO TOPQUERY (query, search, queryType, queryEnv, year, dbtype, weekofyear, extract, querySQL) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (query) DO NOTHING;"""
+      cnt = 1
+      for index, row in AggDf.iterrows():
+        cnt = cnt + 1
+        record_to_insert = (row['HashHash User Datastore'],
+                                'HashHash' ,
+                            row['Select Type'],
+                                'PROD' ,
+                            row['Year'],
+                            row['DBType'],
+                            row['WeekOfYear'],
+                            row['Extract'] ,
+                            row['Original SQL'][0:100])
+        self.cursor.execute(postgres_insert_query, record_to_insert)
+
+      self.postgres_connect.commit()
+
+  def aggregFormat(self,aggreg):
+    dataDict={}
+    dataDict2 = {}
+    dataDict3 = []
+
+    data = list(aggreg)
+    print ( "Nbr of Items in List  : " , len(data))
+
+    for i in range (0, len(data)) :
+       for key, value in data[i].items():
+          if key == "_id" :
+             for key, value in data[i]["_id"].items():
+                 dataDict2[key]= value
+          else :
+             dataDict2[key] = value
+
+       dataDict3.append(dataDict2)
+       dataDict2={}
+
+    AggDf = pd.DataFrame(dataDict3)
+    print ("End of Formatting")
+    return(AggDf)
+
+
+
+  def Top20(self):
+
+      # --- Getting query infos ----
+      mydb = self.myclient["AIMAnalytics"]
+      mycol = mydb["ENRICHED_FULL_SQL_PYTHON"]
+
+      if self.DBT  == None :
+          print ( " All DB Types")
+          aggreg  = mycol.aggregate(p1.pipelineTop20)
+      else:
+          print ( " Only : " , self.DBT )
+          aggreg  = mycol.aggregate(p1.pipelineTop21)
+
+      # print ("Top 20 are ", len(list(aggreg)))
+      AggDf = p1.aggregFormat(aggreg)
+
+      print (len(list(AggDf)))
+
+      p1.updateTopQueryTable(AggDf)
+
+      if len(AggDf)  != 0:
+          AggDf['Extract'] = AggDf['Extract'].apply(lambda x: "{:,}".format(x).rjust(15))
+          AggDf['CountOfSQLs'] = AggDf['CountOfSQLs'].apply(lambda x: "{:,}".format(x).rjust(15))
+          print(tabulate(AggDf, headers='keys', tablefmt='psql',showindex=False, colalign=("left","right","right","left","left","right")))
+
+      if(self.postgres_connect):
+         self.cursor.close()
+         self.postgres_connect.close()
+         print("PostgreSQL connection is closed")
+
+      print("End of Top 20 Most Extracting Queriess")
+
+
+if __name__ == '__main__':
+      print("Start of Top 20 Most Extracting Queries")
+      # print ('Type of myListIPs', type(myListIPs))
+      s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  #Create a TCP/IP
+      p1 = WeeklyTop20PHIQuery("param_data.json")
+
+      p1.posGresPrep()
+
+      p1.Top20()
+
+(env)
